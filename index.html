@@ -43,8 +43,9 @@
   #gameArea { position: relative; flex: 1; min-height: 0; }
   canvas { display: block; width: 100%; height: 100%;
     background:
-      repeating-linear-gradient(0deg, #12171C 0px, #12171C 1px, #0E1216 1px, #0E1216 40px),
-      repeating-linear-gradient(90deg, #12171C 0px, #12171C 1px, #0E1216 1px, #0E1216 40px);
+      radial-gradient(ellipse at center, #171D24 0%, #0D1114 75%),
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 40px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 40px);
   }
 
   #controls { position: absolute; inset: 0; pointer-events: none; }
@@ -176,6 +177,47 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 let W, H, scale, offX, offY;
 
+// particle system for explosions, hit sparks, muzzle flashes
+let particles = [];
+function spawnBurst(x, y, color, count, opts = {}) {
+  const { speed = 3, life = 30, size = 3, spread = Math.PI*2 } = opts;
+  for (let i = 0; i < count; i++) {
+    const ang = Math.random() * spread - spread/2 + (opts.dir || 0);
+    const spd = speed * (0.4 + Math.random()*0.9);
+    particles.push({
+      x, y, vx: Math.cos(ang)*spd, vy: Math.sin(ang)*spd,
+      life, maxLife: life, color, size: size * (0.6 + Math.random()*0.8),
+    });
+  }
+}
+function updateParticles() {
+  particles = particles.filter(p => {
+    p.x += p.vx; p.y += p.vy;
+    p.vx *= 0.94; p.vy *= 0.94;
+    p.life--;
+    return p.life > 0;
+  });
+}
+function drawParticles() {
+  for (const p of particles) {
+    const a = p.life / p.maxLife;
+    const [sx, sy] = toScreen(p.x, p.y);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(sx, sy, p.size * scale * a, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// track previous state to detect hits/deaths/new shots
+let prevHp = { 1: null, 2: null };
+let prevAlive = { 1: true, 2: true };
+let prevBulletCount = 0;
+let myPrevFiring = false;
+let treadPhase = 0;
+
 function resize() {
   const areaW = gameArea.clientWidth, areaH = gameArea.clientHeight;
   canvas.width = areaW; canvas.height = areaH;
@@ -187,45 +229,196 @@ window.addEventListener('resize', resize);
 
 function toScreen(x, y) { return [offX + x*scale, offY + y*scale]; }
 
-function drawTank(t, color) {
+function drawTank(t, color, glowColor) {
   if (!t || !t.alive) return;
   const [sx, sy] = toScreen(t.x, t.y);
   const s = 24 * scale;
   ctx.save();
   ctx.translate(sx, sy);
   ctx.rotate(t.angle);
-  ctx.fillStyle = '#1A2027';
-  ctx.fillRect(-s/2-2*scale, -s/2-3*scale, s+4*scale, 4*scale);
-  ctx.fillRect(-s/2-2*scale, s/2-1*scale, s+4*scale, 4*scale);
-  ctx.fillStyle = color;
-  ctx.fillRect(-s/2, -s/2+2*scale, s, s-4*scale);
-  ctx.fillStyle = '#0B0E11';
-  ctx.fillRect(0, -3*scale, s/2 + 9*scale, 6*scale);
+
+  // soft ground shadow
+  ctx.save();
+  ctx.translate(2*scale, 3*scale);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, s*0.62, s*0.5, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  // treads (with animated tread marks)
+  const treadY = s/2 - 1*scale;
+  for (const dir of [-1, 1]) {
+    ctx.fillStyle = '#161C22';
+    ctx.fillRect(-s/2-2*scale, dir*treadY - 2*scale, s+4*scale, 4*scale);
+    ctx.fillStyle = '#0B0E11';
+    const segW = 5*scale;
+    const offset = (treadPhase % segW);
+    for (let x = -s/2-2*scale - segW; x < s/2+2*scale; x += segW) {
+      ctx.fillRect(x + offset, dir*treadY - 1.6*scale, segW*0.5, 3.2*scale);
+    }
+  }
+
+  // hull (body) with gradient shading
+  const grad = ctx.createLinearGradient(0, -s/2, 0, s/2);
+  grad.addColorStop(0, shadeColor(color, 28));
+  grad.addColorStop(0.5, color);
+  grad.addColorStop(1, shadeColor(color, -30));
+  ctx.fillStyle = grad;
+  roundRect(-s/2, -s/2+2*scale, s, s-4*scale, 3*scale);
+  ctx.fill();
+  ctx.strokeStyle = shadeColor(color, -45);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // turret (circular)
+  const turretR = s*0.34;
+  const tgrad = ctx.createRadialGradient(-turretR*0.3, -turretR*0.3, 1, 0, 0, turretR);
+  tgrad.addColorStop(0, shadeColor(color, 40));
+  tgrad.addColorStop(1, shadeColor(color, -20));
+  ctx.fillStyle = tgrad;
+  ctx.beginPath();
+  ctx.arc(0, 0, turretR, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = shadeColor(color, -50);
+  ctx.stroke();
+
+  // barrel
+  ctx.fillStyle = '#12171C';
+  ctx.fillRect(turretR*0.3, -2.6*scale, s/2 + 8*scale - turretR*0.3, 5.2*scale);
+  ctx.fillStyle = '#232B33';
+  ctx.fillRect(turretR*0.3, -1*scale, s/2 + 8*scale - turretR*0.3, 1.6*scale);
+
+  // rim light glow accent
+  ctx.strokeStyle = glowColor;
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(0, 0, turretR + 1, -0.6, 0.6);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  ctx.restore();
+}
+
+function shadeColor(hex, amt) {
+  const c = hex.replace('#','');
+  const num = parseInt(c, 16);
+  let r = (num >> 16) + amt, g = ((num >> 8) & 0xff) + amt, b = (num & 0xff) + amt;
+  r = Math.max(0, Math.min(255, r)); g = Math.max(0, Math.min(255, g)); b = Math.max(0, Math.min(255, b));
+  return `rgb(${r},${g},${b})`;
+}
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+}
+
+function drawMuzzleFlash(t, color) {
+  if (!t || !t.alive) return;
+  const [sx, sy] = toScreen(t.x, t.y);
+  const s = 24 * scale;
+  const tipDist = s/2 + 8*scale;
+  const fx = sx + Math.cos(t.angle) * tipDist;
+  const fy = sy + Math.sin(t.angle) * tipDist;
+  ctx.save();
+  ctx.translate(fx, fy);
+  ctx.rotate(t.angle);
+  const grad = ctx.createRadialGradient(0,0,0, 0,0, 9*scale);
+  grad.addColorStop(0, '#FFF3D6');
+  grad.addColorStop(0.4, color);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.ellipse(2*scale, 0, 9*scale, 5*scale, 0, 0, Math.PI*2);
+  ctx.fill();
   ctx.restore();
 }
 function drawBullet(b) {
   const [sx, sy] = toScreen(b.x, b.y);
-  ctx.fillStyle = b.owner === mySlot ? '#F2A93B' : '#3FD6C4';
-  ctx.beginPath(); ctx.arc(sx, sy, 3*scale, 0, Math.PI*2); ctx.fill();
+  const color = b.owner === mySlot ? '#F2A93B' : '#3FD6C4';
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, 7*scale);
+  grad.addColorStop(0, '#FFFFFF');
+  grad.addColorStop(0.3, color);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(sx, sy, 7*scale, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath(); ctx.arc(sx, sy, 2*scale, 0, Math.PI*2); ctx.fill();
 }
 function drawWalls() {
-  ctx.fillStyle = '#232B33'; ctx.strokeStyle = '#3A4552';
   for (const w of walls) {
     const [sx, sy] = toScreen(w.x, w.y);
-    ctx.fillRect(sx, sy, w.w*scale, w.h*scale);
-    ctx.strokeRect(sx+0.5, sy+0.5, w.w*scale-1, w.h*scale-1);
+    const ww = w.w*scale, wh = w.h*scale;
+    const grad = ctx.createLinearGradient(sx, sy, sx, sy+wh);
+    grad.addColorStop(0, '#2E3844');
+    grad.addColorStop(1, '#1B2229');
+    ctx.fillStyle = grad;
+    ctx.fillRect(sx, sy, ww, wh);
+    ctx.strokeStyle = '#454F5C';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(sx+0.5, sy+0.5, ww-1, wh-1);
+    // corner bolts for a industrial-plate look
+    if (ww > 12*scale && wh > 12*scale) {
+      ctx.fillStyle = '#0E1216';
+      const pad = 5*scale;
+      for (const [bx, by] of [[pad,pad],[ww-pad,pad],[pad,wh-pad],[ww-pad,wh-pad]]) {
+        ctx.beginPath(); ctx.arc(sx+bx, sy+by, 1.3*scale, 0, Math.PI*2); ctx.fill();
+      }
+    }
   }
+}
+
+function drawVignette() {
+  const cx = canvas.width/2, cy = canvas.height/2;
+  const r = Math.max(canvas.width, canvas.height) * 0.75;
+  const grad = ctx.createRadialGradient(cx, cy, r*0.3, cx, cy, r);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
 function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawWalls();
+
   if (latestState) {
-    latestState.bullets.forEach(drawBullet);
     const me = latestState.players[mySlot];
     const opp = latestState.players[mySlot === 1 ? 2 : 1];
-    drawTank(me, '#F2A93B');
-    drawTank(opp, '#3FD6C4');
+
+    // detect hits (hp decreased) -> spark burst; detect death -> explosion
+    for (const [slot, tank] of [[mySlot, me], [mySlot === 1 ? 2 : 1, opp]]) {
+      if (!tank) continue;
+      const prevH = prevHp[slot];
+      if (prevH !== null && tank.hp < prevH) {
+        spawnBurst(tank.x, tank.y, '#FFD27A', 10, { speed: 2.5, life: 18, size: 2.5 });
+      }
+      if (prevAlive[slot] && !tank.alive) {
+        spawnBurst(tank.x, tank.y, '#FF7A45', 26, { speed: 4.5, life: 40, size: 4 });
+        spawnBurst(tank.x, tank.y, '#3A4552', 14, { speed: 2, life: 55, size: 5 });
+      }
+      prevHp[slot] = tank.hp;
+      prevAlive[slot] = tank.alive;
+    }
+
+    // muzzle flash: own tank via local firing edge, opponent via bullet-count growth
+    if (firing && me && me.alive) drawMuzzleFlash(me, '#F2A93B');
+    if (latestState.bullets.length > prevBulletCount && opp && opp.alive) {
+      drawMuzzleFlash(opp, '#3FD6C4');
+    }
+    prevBulletCount = latestState.bullets.length;
+
+    latestState.bullets.forEach(drawBullet);
+    drawTank(me, '#F2A93B', '#FFD27A');
+    drawTank(opp, '#3FD6C4', '#8CF5E6');
 
     document.getElementById('hpMe').style.width = (me ? Math.max(0,me.hp) : 0) + '%';
     document.getElementById('hpOpp').style.width = (opp ? Math.max(0,opp.hp) : 0) + '%';
@@ -246,6 +439,13 @@ function render() {
       overlay.classList.remove('show');
     }
   }
+
+  updateParticles();
+  drawParticles();
+  drawVignette();
+
+  if (Math.abs(stickVec.x) > 0.08 || Math.abs(stickVec.y) > 0.08) treadPhase += 0.9 * scale;
+
   requestAnimationFrame(render);
 }
 let renderStarted = false;
