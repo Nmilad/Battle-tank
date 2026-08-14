@@ -14,9 +14,9 @@ const wss = new WebSocketServer({ server });
 // ---------- logical arena (fixed, client scales to fit screen) ----------
 const W = 900, H = 600;
 const TANK_SIZE = 24;
-const TANK_SPEED = 2.3;
-const TURN_SPEED = 0.05;
-const BULLET_SPEED = 6.2;
+const TANK_SPEED = 3.8;
+const TURN_SPEED = 0.09;
+const BULLET_SPEED = 7.5;
 const BULLET_COOLDOWN = 24;
 const MAX_HP = 100;
 const BULLET_DAMAGE = 20;
@@ -99,7 +99,7 @@ function tick(room) {
       const other = room.players[slot === 1 ? 2 : 1].tank;
       const { dx: sx, dy: sy, firing } = t.input;
 
-      if (Math.abs(sx) > 0.15 || Math.abs(sy) > 0.15) {
+      if (Math.abs(sx) > 0.08 || Math.abs(sy) > 0.08) {
         const targetAngle = Math.atan2(sy, sx);
         let diff = targetAngle - t.angle;
         while (diff > Math.PI) diff -= Math.PI*2;
