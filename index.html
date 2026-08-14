@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Tank Arena</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; user-select: none; }
   html, body { height: 100%; background: #0B0E11; overflow: hidden; font-family: 'Courier New', monospace; touch-action: none; }
@@ -96,6 +97,16 @@
 </div>
 
 <script>
+// ---------- Telegram Mini App setup ----------
+if (window.Telegram && window.Telegram.WebApp) {
+  const tg = window.Telegram.WebApp;
+  tg.ready();
+  tg.expand();
+  if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+  if (tg.setHeaderColor) { try { tg.setHeaderColor('#0B0E11'); } catch(e){} }
+  if (tg.setBackgroundColor) { try { tg.setBackgroundColor('#0B0E11'); } catch(e){} }
+}
+
 const joinScreen = document.getElementById('joinScreen');
 const roomInput = document.getElementById('roomInput');
 const joinBtn = document.getElementById('joinBtn');
