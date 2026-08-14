@@ -113,6 +113,28 @@ if (params.get('room')) roomInput.value = params.get('room');
 let ws, mySlot, arena = {W:900,H:600}, walls = [];
 let latestState = null;
 
+// ---------- shared physics constants (must match server) ----------
+const TANK_SIZE = 24;
+const TANK_SPEED = 2.3;
+const TURN_SPEED = 0.05;
+const SERVER_TICK_MS = 1000 / 30;
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+function tankBoundsAt(x, y) {
+  return {x: x - TANK_SIZE/2, y: y - TANK_SIZE/2, w: TANK_SIZE, h: TANK_SIZE};
+}
+function wallBlocked(x, y) {
+  const b = tankBoundsAt(x, y);
+  for (const w of walls) if (rectsOverlap(b, w)) return true;
+  return false;
+}
+
+// ---------- local prediction state for own tank ----------
+let predicted = null; // {x, y, angle}
+let predictionReady = false;
+
 joinBtn.addEventListener('click', () => {
   const room = (roomInput.value || 'DEFAULT').trim().toUpperCase();
   if (!room) return;
@@ -156,6 +178,23 @@ function connect(room) {
     }
     if (msg.type === 'state') {
       latestState = msg;
+      const me = msg.players[mySlot];
+      if (me && me.alive) {
+        if (!predictionReady) {
+          predicted = { x: me.x, y: me.y, angle: me.angle };
+          predictionReady = true;
+        } else {
+          // soft reconciliation: nudge prediction toward server truth
+          predicted.x += (me.x - predicted.x) * 0.25;
+          predicted.y += (me.y - predicted.y) * 0.25;
+          let da = me.angle - predicted.angle;
+          while (da > Math.PI) da -= Math.PI*2;
+          while (da < -Math.PI) da += Math.PI*2;
+          predicted.angle += da * 0.25;
+        }
+      } else {
+        predictionReady = false;
+      }
     }
   };
 }
@@ -176,13 +215,12 @@ window.addEventListener('resize', resize);
 
 function toScreen(x, y) { return [offX + x*scale, offY + y*scale]; }
 
-function drawTank(t, color) {
-  if (!t || !t.alive) return;
-  const [sx, sy] = toScreen(t.x, t.y);
+function drawTank(x, y, angle, color) {
+  const [sx, sy] = toScreen(x, y);
   const s = 24 * scale;
   ctx.save();
   ctx.translate(sx, sy);
-  ctx.rotate(t.angle);
+  ctx.rotate(angle);
   ctx.fillStyle = '#1A2027';
   ctx.fillRect(-s/2-2*scale, -s/2-3*scale, s+4*scale, 4*scale);
   ctx.fillRect(-s/2-2*scale, s/2-1*scale, s+4*scale, 4*scale);
@@ -206,15 +244,50 @@ function drawWalls() {
   }
 }
 
-function render() {
+let lastFrameTime = performance.now();
+
+function stepPrediction(dt) {
+  if (!predictionReady || !predicted) return;
+  if (Math.abs(stickVec.x) < 0.15 && Math.abs(stickVec.y) < 0.15) return;
+
+  const tickEquiv = dt / SERVER_TICK_MS;
+  const targetAngle = Math.atan2(stickVec.y, stickVec.x);
+  let diff = targetAngle - predicted.angle;
+  while (diff > Math.PI) diff -= Math.PI*2;
+  while (diff < -Math.PI) diff += Math.PI*2;
+  const maxTurn = TURN_SPEED * tickEquiv;
+  predicted.angle += Math.max(-maxTurn, Math.min(maxTurn, diff));
+
+  const mag = Math.min(1, Math.hypot(stickVec.x, stickVec.y));
+  const mx = Math.cos(predicted.angle) * TANK_SPEED * mag * tickEquiv;
+  const my = Math.sin(predicted.angle) * TANK_SPEED * mag * tickEquiv;
+
+  if (!wallBlocked(predicted.x + mx, predicted.y)) predicted.x += mx;
+  if (!wallBlocked(predicted.x, predicted.y + my)) predicted.y += my;
+
+  predicted.x = Math.max(6, Math.min(arena.W - 6, predicted.x));
+  predicted.y = Math.max(6, Math.min(arena.H - 6, predicted.y));
+}
+
+function render(now) {
+  const dt = Math.min(50, now - lastFrameTime);
+  lastFrameTime = now;
+  stepPrediction(dt);
+
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawWalls();
+
   if (latestState) {
     latestState.bullets.forEach(drawBullet);
     const me = latestState.players[mySlot];
     const opp = latestState.players[mySlot === 1 ? 2 : 1];
-    drawTank(me, '#F2A93B');
-    drawTank(opp, '#3FD6C4');
+
+    if (me && me.alive && predicted) {
+      drawTank(predicted.x, predicted.y, predicted.angle, '#F2A93B');
+    } else if (me && me.alive) {
+      drawTank(me.x, me.y, me.angle, '#F2A93B');
+    }
+    if (opp && opp.alive) drawTank(opp.x, opp.y, opp.angle, '#3FD6C4');
 
     document.getElementById('hpMe').style.width = (me ? Math.max(0,me.hp) : 0) + '%';
     document.getElementById('hpOpp').style.width = (opp ? Math.max(0,opp.hp) : 0) + '%';
@@ -238,7 +311,7 @@ function render() {
   requestAnimationFrame(render);
 }
 let renderStarted = false;
-function startRender() { if (!renderStarted) { renderStarted = true; render(); } }
+function startRender() { if (!renderStarted) { renderStarted = true; lastFrameTime = performance.now(); requestAnimationFrame(render); } }
 
 restartBtn.addEventListener('click', () => { ws.send(JSON.stringify({type:'restart'})); });
 
