@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tank Arena</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body { height: 100%; background: #0B0E11; overflow: hidden; font-family: 'Courier New', monospace; touch-action: none; }
+  body { display: flex; flex-direction: column; color: #C9D1D9; }
+
+  #joinScreen {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 18px; padding: 24px; text-align: center; z-index: 20; background: #0B0E11;
+  }
+  #joinScreen.hidden { display: none; }
+  #joinScreen .title { font-size: 26px; letter-spacing: 0.12em; text-transform: uppercase; color: #F2A93B; }
+  #joinScreen input {
+    font-family: inherit; background: #12171C; border: 1px solid #3A4552; color: #C9D1D9;
+    padding: 12px 16px; font-size: 16px; letter-spacing: 0.15em; text-transform: uppercase;
+    text-align: center; width: 220px;
+  }
+  #joinScreen button {
+    font-family: inherit; background: transparent; border: 1px solid #F2A93B; color: #F2A93B;
+    padding: 12px 26px; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase;
+  }
+  #joinScreen button:active { background: #F2A93B; color: #0B0E11; }
+  #joinScreen .hint { font-size: 11px; color: #6B7684; line-height: 1.7; max-width: 280px; }
+  #status { font-size: 12px; color: #6B7684; min-height: 16px; }
+
+  #hud { display: flex; justify-content: space-between; padding: 8px 10px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; flex-shrink: 0; }
+  .player-tag { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 7px; height: 7px; flex-shrink: 0; }
+  .me .dot { background: #F2A93B; }
+  .opp .dot { background: #3FD6C4; }
+  .hp-bar { width: 70px; height: 5px; background: #1A2027; overflow: hidden; }
+  .hp-fill { height: 100%; transition: width 0.1s linear; }
+  .me .hp-fill { background: #F2A93B; }
+  .opp .hp-fill { background: #3FD6C4; }
+
+  #gameArea { position: relative; flex: 1; min-height: 0; }
+  canvas { display: block; width: 100%; height: 100%;
+    background:
+      repeating-linear-gradient(0deg, #12171C 0px, #12171C 1px, #0E1216 1px, #0E1216 40px),
+      repeating-linear-gradient(90deg, #12171C 0px, #12171C 1px, #0E1216 1px, #0E1216 40px);
+  }
+
+  #controls { position: absolute; inset: 0; pointer-events: none; }
+  #stick, #fireBtn { pointer-events: auto; }
+  #stick { position: absolute; left: 22px; bottom: 22px; width: 110px; height: 110px; border: 1px solid #3A4552; border-radius: 50%; background: rgba(30,38,46,0.5); }
+  #stickKnob { position: absolute; left: 35px; top: 35px; width: 40px; height: 40px; border-radius: 50%; background: #F2A93B; opacity: 0.85; }
+  #fireBtn { position: absolute; right: 26px; bottom: 34px; width: 76px; height: 76px; border-radius: 50%; border: 1px solid #F2A93B; background: rgba(242,169,59,0.12); color: #F2A93B; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+  #fireBtn:active { background: rgba(242,169,59,0.35); }
+
+  #overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; background: rgba(11,14,17,0.92); gap: 16px; text-align: center; padding: 20px; pointer-events: auto; z-index: 10; }
+  #overlay.show { display: flex; }
+  #overlay .title { font-size: 24px; letter-spacing: 0.1em; text-transform: uppercase; }
+  #overlay .sub { font-size: 12px; color: #6B7684; line-height: 1.6; }
+  #overlay button { font-family: inherit; background: transparent; border: 1px solid #F2A93B; color: #F2A93B; padding: 12px 26px; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+
+<div id="joinScreen">
+  <div class="title">Tank Arena</div>
+  <input id="roomInput" maxlength="8" placeholder="کد اتاق" autocomplete="off" autocapitalize="characters">
+  <button id="joinBtn">ورود به اتاق</button>
+  <div class="hint">یه کد دلخواه بنویس (مثلاً ALI123) و همون کد رو به دوستت بده تا هر دو وارد یه اتاق بشید.</div>
+  <div id="status"></div>
+</div>
+
+<div id="hud" style="display:none">
+  <div class="player-tag me">
+    <div class="dot"></div><span>شما</span>
+    <div class="hp-bar"><div class="hp-fill" id="hpMe" style="width:100%"></div></div>
+  </div>
+  <div id="roundLabel" style="color:#4A5560; font-size:11px; align-self:center;">ROUND 1</div>
+  <div class="player-tag opp">
+    <div class="hp-bar"><div class="hp-fill" id="hpOpp" style="width:100%"></div></div>
+    <span>حریف</span><div class="dot"></div>
+  </div>
+</div>
+
+<div id="gameArea" style="display:none">
+  <canvas id="game"></canvas>
+  <div id="controls">
+    <div id="stick"><div id="stickKnob"></div></div>
+    <button id="fireBtn">شلیک</button>
+  </div>
+  <div id="overlay">
+    <div class="title" id="overlayTitle">در انتظار حریف...</div>
+    <div class="sub" id="overlaySub"></div>
+    <button id="restartBtn" style="display:none">دور بعد</button>
+  </div>
+</div>
+
+<script>
+const joinScreen = document.getElementById('joinScreen');
+const roomInput = document.getElementById('roomInput');
+const joinBtn = document.getElementById('joinBtn');
+const statusEl = document.getElementById('status');
+const hud = document.getElementById('hud');
+const gameArea = document.getElementById('gameArea');
+const overlay = document.getElementById('overlay');
+const overlayTitle = document.getElementById('overlayTitle');
+const overlaySub = document.getElementById('overlaySub');
+const restartBtn = document.getElementById('restartBtn');
+
+const params = new URLSearchParams(location.search);
+if (params.get('room')) roomInput.value = params.get('room');
+
+let ws, mySlot, arena = {W:900,H:600}, walls = [];
+let latestState = null;
+
+joinBtn.addEventListener('click', () => {
+  const room = (roomInput.value || 'DEFAULT').trim().toUpperCase();
+  if (!room) return;
+  connect(room);
+});
+
+function connect(room) {
+  statusEl.textContent = 'در حال اتصال...';
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}?room=${encodeURIComponent(room)}`);
+
+  ws.onopen = () => { statusEl.textContent = ''; };
+  ws.onerror = () => { statusEl.textContent = 'خطا در اتصال به سرور.'; };
+  ws.onclose = () => {
+    if (joinScreen.classList.contains('hidden')) {
+      overlayTitle.textContent = 'اتصال قطع شد';
+      overlaySub.textContent = 'حریف یا سرور از دسترس خارج شد.';
+      overlay.classList.add('show');
+      restartBtn.style.display = 'none';
+    } else {
+      statusEl.textContent = 'اتصال قطع شد.';
+    }
+  };
+
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'full') {
+      statusEl.textContent = 'این اتاق پره. یه کد دیگه امتحان کن.';
+      ws.close();
+      return;
+    }
+    if (msg.type === 'welcome') {
+      mySlot = msg.slot;
+      arena = msg.arena;
+      walls = msg.walls;
+      joinScreen.classList.add('hidden');
+      hud.style.display = 'flex';
+      gameArea.style.display = 'block';
+      resize();
+      startRender();
+    }
+    if (msg.type === 'state') {
+      latestState = msg;
+    }
+  };
+}
+
+// ---------- rendering ----------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W, H, scale, offX, offY;
+
+function resize() {
+  const areaW = gameArea.clientWidth, areaH = gameArea.clientHeight;
+  canvas.width = areaW; canvas.height = areaH;
+  scale = Math.min(areaW / arena.W, areaH / arena.H);
+  offX = (areaW - arena.W * scale) / 2;
+  offY = (areaH - arena.H * scale) / 2;
+}
+window.addEventListener('resize', resize);
+
+function toScreen(x, y) { return [offX + x*scale, offY + y*scale]; }
+
+function drawTank(t, color) {
+  if (!t || !t.alive) return;
+  const [sx, sy] = toScreen(t.x, t.y);
+  const s = 24 * scale;
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.rotate(t.angle);
+  ctx.fillStyle = '#1A2027';
+  ctx.fillRect(-s/2-2*scale, -s/2-3*scale, s+4*scale, 4*scale);
+  ctx.fillRect(-s/2-2*scale, s/2-1*scale, s+4*scale, 4*scale);
+  ctx.fillStyle = color;
+  ctx.fillRect(-s/2, -s/2+2*scale, s, s-4*scale);
+  ctx.fillStyle = '#0B0E11';
+  ctx.fillRect(0, -3*scale, s/2 + 9*scale, 6*scale);
+  ctx.restore();
+}
+function drawBullet(b) {
+  const [sx, sy] = toScreen(b.x, b.y);
+  ctx.fillStyle = b.owner === mySlot ? '#F2A93B' : '#3FD6C4';
+  ctx.beginPath(); ctx.arc(sx, sy, 3*scale, 0, Math.PI*2); ctx.fill();
+}
+function drawWalls() {
+  ctx.fillStyle = '#232B33'; ctx.strokeStyle = '#3A4552';
+  for (const w of walls) {
+    const [sx, sy] = toScreen(w.x, w.y);
+    ctx.fillRect(sx, sy, w.w*scale, w.h*scale);
+    ctx.strokeRect(sx+0.5, sy+0.5, w.w*scale-1, w.h*scale-1);
+  }
+}
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawWalls();
+  if (latestState) {
+    latestState.bullets.forEach(drawBullet);
+    const me = latestState.players[mySlot];
+    const opp = latestState.players[mySlot === 1 ? 2 : 1];
+    drawTank(me, '#F2A93B');
+    drawTank(opp, '#3FD6C4');
+
+    document.getElementById('hpMe').style.width = (me ? Math.max(0,me.hp) : 0) + '%';
+    document.getElementById('hpOpp').style.width = (opp ? Math.max(0,opp.hp) : 0) + '%';
+    document.getElementById('roundLabel').textContent = 'ROUND ' + latestState.round;
+
+    const oppConnected = latestState.connected[mySlot === 1 ? 2 : 1];
+    if (!oppConnected) {
+      overlayTitle.textContent = 'در انتظار حریف...';
+      overlaySub.textContent = 'کد اتاق رو به دوستت بده تا وصل بشه.';
+      overlay.classList.add('show');
+      restartBtn.style.display = 'none';
+    } else if (latestState.matchOver && latestState.winner) {
+      overlayTitle.textContent = latestState.winner === mySlot ? 'بردی 🎉' : 'باختی 💥';
+      overlaySub.textContent = '';
+      overlay.classList.add('show');
+      restartBtn.style.display = 'inline-block';
+    } else {
+      overlay.classList.remove('show');
+    }
+  }
+  requestAnimationFrame(render);
+}
+let renderStarted = false;
+function startRender() { if (!renderStarted) { renderStarted = true; render(); } }
+
+restartBtn.addEventListener('click', () => { ws.send(JSON.stringify({type:'restart'})); });
+
+// ---------- touch joystick ----------
+const stick = document.getElementById('stick');
+const knob = document.getElementById('stickKnob');
+let stickActive = false, stickVec = {x:0, y:0};
+
+function stickPos() { const r = stick.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; }
+function handleStickMove(clientX, clientY) {
+  const c = stickPos();
+  let dx = clientX - c.x, dy = clientY - c.y;
+  const dist = Math.min(Math.hypot(dx, dy), 40);
+  const ang = Math.atan2(dy, dx);
+  dx = Math.cos(ang) * dist; dy = Math.sin(ang) * dist;
+  knob.style.left = (35 + dx) + 'px'; knob.style.top = (35 + dy) + 'px';
+  stickVec = { x: dx/40, y: dy/40 };
+}
+function resetStick() { stickActive = false; stickVec = {x:0,y:0}; knob.style.left = '35px'; knob.style.top = '35px'; }
+
+stick.addEventListener('touchstart', e => { stickActive = true; handleStickMove(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); });
+stick.addEventListener('touchmove', e => { if (stickActive) handleStickMove(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); });
+stick.addEventListener('touchend', e => { resetStick(); e.preventDefault(); });
+stick.addEventListener('mousedown', e => { stickActive = true; handleStickMove(e.clientX, e.clientY); });
+window.addEventListener('mousemove', e => { if (stickActive) handleStickMove(e.clientX, e.clientY); });
+window.addEventListener('mouseup', () => resetStick());
+
+let firing = false;
+const fireBtn = document.getElementById('fireBtn');
+fireBtn.addEventListener('touchstart', e => { firing = true; e.preventDefault(); });
+fireBtn.addEventListener('touchend', e => { firing = false; e.preventDefault(); });
+fireBtn.addEventListener('mousedown', () => firing = true);
+fireBtn.addEventListener('mouseup', () => firing = false);
+
+// send input at fixed rate
+setInterval(() => {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'input', dx: stickVec.x, dy: stickVec.y, firing }));
+  }
+}, 50);
+</script>
+</body>
+</html>
