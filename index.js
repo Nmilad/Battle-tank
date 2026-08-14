@@ -8,6 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.static(path.join(__dirname, '..', 'client')));
 
+
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
