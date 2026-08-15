@@ -12,26 +12,53 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 // ---------- logical arena (fixed, client scales to fit screen) ----------
-const W = 900, H = 600;
-const TANK_SIZE = 24;
-const TANK_SPEED = 3.8;
-const TURN_SPEED = 0.09;
-const BULLET_SPEED = 7.5;
-const BULLET_COOLDOWN = 24;
-const MAX_HP = 100;
-const BULLET_DAMAGE = 20;
+const W = 1000, H = 500;
+const GROUND_Y = H - 60;
+const TANK_W = 36, TANK_H = 44;
+const GRAVITY = 0.55;
+const JUMP_VELOCITY = -11.5;
 const TICK_MS = 1000 / 30;
 
-function makeWalls() {
+// ---------- class definitions ----------
+const CLASSES = {
+  typhoon: {
+    name: 'تایفون', color: '#C9B458',
+    maxHp: 150, speed: 2.6, jumpVel: JUMP_VELOCITY * 0.85,
+    bulletDamage: 14, bulletSpeed: 7, fireCooldown: 30,
+    ability: 'slam', abilityCooldown: 300,
+  },
+  reaper: {
+    name: 'ریپر', color: '#AEB7BE',
+    maxHp: 75, speed: 4.6, jumpVel: JUMP_VELOCITY * 1.1,
+    bulletDamage: 9, bulletSpeed: 9.5, fireCooldown: 14,
+    ability: 'dash', abilityCooldown: 130,
+  },
+  guardian: {
+    name: 'گاردین', color: '#5FA0D6',
+    maxHp: 105, speed: 3.2, jumpVel: JUMP_VELOCITY,
+    bulletDamage: 7, bulletSpeed: 7.5, fireCooldown: 28,
+    ability: 'heal', abilityCooldown: 350,
+  },
+  vanquisher: {
+    name: 'وانکویشر', color: '#C25B4A',
+    maxHp: 65, speed: 2.8, jumpVel: JUMP_VELOCITY * 0.9,
+    bulletDamage: 24, bulletSpeed: 11, fireCooldown: 48,
+    ability: 'snipe', abilityCooldown: 300,
+  },
+};
+const DEFAULT_CLASS = 'typhoon';
+
+function makePlatforms() {
   return [
-    {x: W*0.46, y: 0, w: W*0.07, h: H*0.3},
-    {x: W*0.46, y: H*0.7, w: W*0.07, h: H*0.3},
-    {x: W*0.16, y: H*0.42, w: W*0.14, h: H*0.05},
-    {x: W*0.70, y: H*0.53, w: W*0.14, h: H*0.05},
-    {x: 0, y: 0, w: W, h: 6},
-    {x: 0, y: H-6, w: W, h: 6},
-    {x: 0, y: 0, w: 6, h: H},
-    {x: W-6, y: 0, w: 6, h: H},
+    // ground
+    {x: 0, y: GROUND_Y, w: W, h: H - GROUND_Y},
+    // floating platforms
+    {x: W*0.10, y: GROUND_Y - 130, w: W*0.16, h: 16},
+    {x: W*0.74, y: GROUND_Y - 130, w: W*0.16, h: 16},
+    {x: W*0.42, y: GROUND_Y - 220, w: W*0.16, h: 16},
+    // side walls (invisible bounds)
+    {x: -20, y: 0, w: 20, h: H},
+    {x: W, y: 0, w: 20, h: H},
   ];
 }
 
@@ -39,20 +66,29 @@ function rectsOverlap(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 function tankBounds(t) {
-  return {x: t.x - TANK_SIZE/2, y: t.y - TANK_SIZE/2, w: TANK_SIZE, h: TANK_SIZE};
+  return {x: t.x - TANK_W/2, y: t.y - TANK_H, w: TANK_W, h: TANK_H};
 }
 
-const rooms = new Map(); // roomId -> room state
+const rooms = new Map();
 
-function makeTank(x, y, angle) {
-  return { x, y, angle, hp: MAX_HP, cooldown: 0, alive: true, input: {dx:0, dy:0, firing:false} };
+function makeTank(x, cls) {
+  const def = CLASSES[cls] || CLASSES[DEFAULT_CLASS];
+  return {
+    x, y: GROUND_Y, vy: 0, facing: 1, grounded: true, cls,
+    hp: def.maxHp, maxHp: def.maxHp,
+    cooldown: 0, alive: true,
+    input: {dx:0, firing:false},
+    abilityCooldown: 0,
+    dashTicks: 0,
+    aimBoostTicks: 0,
+  };
 }
 
 function createRoom(roomId) {
   const room = {
     id: roomId,
-    walls: makeWalls(),
-    players: {}, // slot -> {ws, tank}
+    platforms: makePlatforms(),
+    players: {},
     bullets: [],
     round: 1,
     matchOver: true,
@@ -64,30 +100,121 @@ function createRoom(roomId) {
 }
 
 function resetMatch(room) {
-  room.players[1].tank = makeTank(W*0.16, H*0.5, 0);
-  room.players[2].tank = makeTank(W*0.84, H*0.5, Math.PI);
+  const cls1 = (room.players[1] && room.players[1].cls) || DEFAULT_CLASS;
+  const cls2 = (room.players[2] && room.players[2].cls) || DEFAULT_CLASS;
+  room.players[1].tank = makeTank(W*0.2, cls1);
+  room.players[1].tank.facing = 1;
+  room.players[2].tank = makeTank(W*0.8, cls2);
+  room.players[2].tank.facing = -1;
   room.bullets = [];
   room.matchOver = false;
   room.winner = null;
 }
 
-function tryMove(tank, otherTank, nx, ny, walls) {
-  const b = {x: nx - TANK_SIZE/2, y: ny - TANK_SIZE/2, w: TANK_SIZE, h: TANK_SIZE};
-  for (const w of walls) if (rectsOverlap(b, w)) return false;
-  if (otherTank.alive && rectsOverlap(b, tankBounds(otherTank))) return false;
-  return true;
+// resolve movement with platform collision (simple AABB, solid platforms)
+function moveTank(t, other, platforms) {
+  // horizontal
+  const newX = t.x + t._dx;
+  let b = {x: newX - TANK_W/2, y: t.y - TANK_H, w: TANK_W, h: TANK_H};
+  let blocked = false;
+  for (const p of platforms) if (rectsOverlap(b, p)) { blocked = true; break; }
+  if (other.alive && rectsOverlap(b, tankBounds(other))) blocked = true;
+  if (!blocked) t.x = Math.max(10, Math.min(W - 10, newX));
+
+  // vertical
+  t.vy += GRAVITY;
+  const newY = t.y + t.vy;
+  b = {x: t.x - TANK_W/2, y: newY - TANK_H, w: TANK_W, h: TANK_H};
+  let vBlocked = false;
+  let landed = false;
+  for (const p of platforms) {
+    if (rectsOverlap(b, p)) {
+      vBlocked = true;
+      if (t.vy > 0) { t.y = p.y; landed = true; }
+      else { t.y = p.y + p.h + TANK_H; }
+      t.vy = 0;
+      break;
+    }
+  }
+  if (!vBlocked) t.y = newY;
+  t.grounded = landed;
 }
 
 function fireBullet(room, tank, slot) {
+  const def = CLASSES[tank.cls];
   if (tank.cooldown > 0) return;
+  const dmgMult = tank.aimBoostTicks > 0 ? 1.5 : 1;
+  const spdMult = tank.aimBoostTicks > 0 ? 1.3 : 1;
   room.bullets.push({
-    x: tank.x + Math.cos(tank.angle) * (TANK_SIZE/2 + 6),
-    y: tank.y + Math.sin(tank.angle) * (TANK_SIZE/2 + 6),
-    vx: Math.cos(tank.angle) * BULLET_SPEED,
-    vy: Math.sin(tank.angle) * BULLET_SPEED,
+    x: tank.x + tank.facing * (TANK_W/2 + 4),
+    y: tank.y - TANK_H*0.55,
+    vx: tank.facing * def.bulletSpeed * spdMult,
     owner: slot,
+    damage: def.bulletDamage * dmgMult,
   });
-  tank.cooldown = BULLET_COOLDOWN;
+  tank.cooldown = def.fireCooldown;
+}
+
+function applyDamage(room, targetSlot, amount, sourceSlot) {
+  const p = room.players[targetSlot];
+  if (!p || !p.tank.alive) return;
+  p.tank.hp -= amount;
+  if (p.tank.hp <= 0) {
+    p.tank.hp = 0; p.tank.alive = false;
+    room.matchOver = true;
+    room.winner = sourceSlot;
+    room.round++;
+  }
+}
+
+function useAbility(room, slot) {
+  const p = room.players[slot];
+  if (!p || !p.tank.alive) return;
+  const t = p.tank;
+  const def = CLASSES[t.cls];
+  if (t.abilityCooldown > 0) return;
+  t.abilityCooldown = def.abilityCooldown;
+
+  const otherSlot = slot === 1 ? 2 : 1;
+  const other = room.players[otherSlot];
+
+  switch (def.ability) {
+    case 'slam': {
+      if (other && other.tank.alive) {
+        const dist = Math.hypot(other.tank.x - t.x, other.tank.y - t.y);
+        if (dist < 110) {
+          applyDamage(room, otherSlot, 18, slot);
+          const dir = other.tank.x > t.x ? 1 : -1;
+          other.tank.x += dir * 45;
+          other.tank.vy = -6;
+        }
+      }
+      break;
+    }
+    case 'dash': {
+      t.dashTicks = 9;
+      break;
+    }
+    case 'heal': {
+      t.hp = Math.min(t.maxHp, t.hp + 35);
+      break;
+    }
+    case 'snipe': {
+      t.aimBoostTicks = 90;
+      break;
+    }
+  }
+}
+
+function jumpTank(room, slot) {
+  const p = room.players[slot];
+  if (!p || !p.tank.alive) return;
+  const t = p.tank;
+  const def = CLASSES[t.cls];
+  if (t.grounded) {
+    t.vy = def.jumpVel;
+    t.grounded = false;
+  }
 }
 
 function tick(room) {
@@ -96,45 +223,40 @@ function tick(room) {
       const p = room.players[slot];
       if (!p || !p.tank.alive) continue;
       const t = p.tank;
+      const def = CLASSES[t.cls];
       const other = room.players[slot === 1 ? 2 : 1].tank;
-      const { dx: sx, dy: sy, firing } = t.input;
+      const { dx, firing } = t.input;
 
-      if (Math.abs(sx) > 0.08 || Math.abs(sy) > 0.08) {
-        const targetAngle = Math.atan2(sy, sx);
-        let diff = targetAngle - t.angle;
-        while (diff > Math.PI) diff -= Math.PI*2;
-        while (diff < -Math.PI) diff += Math.PI*2;
-        t.angle += Math.max(-TURN_SPEED, Math.min(TURN_SPEED, diff));
+      if (t.abilityCooldown > 0) t.abilityCooldown--;
+      if (t.aimBoostTicks > 0) t.aimBoostTicks--;
 
-        const mag = Math.min(1, Math.hypot(sx, sy));
-        const mx = Math.cos(t.angle) * TANK_SPEED * mag;
-        const my = Math.sin(t.angle) * TANK_SPEED * mag;
-        if (tryMove(t, other, t.x + mx, t.y, room.walls)) t.x += mx;
-        if (tryMove(t, other, t.x, t.y + my, room.walls)) t.y += my;
+      let moveDx = 0;
+      if (t.dashTicks > 0) {
+        t.dashTicks--;
+        moveDx = t.facing * def.speed * 2.4;
+      } else if (Math.abs(dx) > 0.12) {
+        moveDx = Math.sign(dx) * def.speed * Math.min(1, Math.abs(dx));
+        t.facing = dx > 0 ? 1 : -1;
       }
+      t._dx = moveDx;
+      moveTank(t, other, room.platforms);
+
       t.cooldown = Math.max(0, t.cooldown - 1);
       if (firing) fireBullet(room, t, slot);
     }
 
     room.bullets = room.bullets.filter(b => {
-      b.x += b.vx; b.y += b.vy;
-      const bb = {x: b.x-3, y: b.y-3, w:6, h:6};
-      for (const w of room.walls) if (rectsOverlap(bb, w)) return false;
+      b.x += b.vx;
+      const bb = {x: b.x-4, y: b.y-3, w:8, h:6};
       for (const slot of [1, 2]) {
         const p = room.players[slot];
         if (!p || slot === b.owner || !p.tank.alive) continue;
         if (rectsOverlap(bb, tankBounds(p.tank))) {
-          p.tank.hp -= BULLET_DAMAGE;
-          if (p.tank.hp <= 0) {
-            p.tank.hp = 0; p.tank.alive = false;
-            room.matchOver = true;
-            room.winner = b.owner;
-            room.round++;
-          }
+          applyDamage(room, slot, b.damage, b.owner);
           return false;
         }
       }
-      return b.x > 0 && b.x < W && b.y > 0 && b.y < H;
+      return b.x > -20 && b.x < W + 20;
     });
   }
 
@@ -154,7 +276,12 @@ function tick(room) {
 }
 
 function serTank(t) {
-  return { x: t.x, y: t.y, angle: t.angle, hp: t.hp, alive: t.alive };
+  const def = CLASSES[t.cls];
+  return {
+    x: t.x, y: t.y, facing: t.facing, hp: t.hp, maxHp: t.maxHp, alive: t.alive,
+    cls: t.cls, abilityCooldown: t.abilityCooldown, abilityMax: def.abilityCooldown,
+    dashing: t.dashTicks > 0, aimBoost: t.aimBoostTicks > 0, grounded: t.grounded,
+  };
 }
 
 function broadcast(room, msg) {
@@ -168,6 +295,7 @@ function broadcast(room, msg) {
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://x');
   const roomId = (url.searchParams.get('room') || 'default').toUpperCase().slice(0, 8);
+  const cls = CLASSES[url.searchParams.get('cls')] ? url.searchParams.get('cls') : DEFAULT_CLASS;
 
   let room = rooms.get(roomId);
   if (!room) room = createRoom(roomId);
@@ -182,8 +310,12 @@ wss.on('connection', (ws, req) => {
     return;
   }
 
-  room.players[slot] = { ws, tank: makeTank(0, 0, 0) };
-  ws.send(JSON.stringify({ type: 'welcome', slot, roomId, arena: { W, H }, walls: room.walls }));
+  room.players[slot] = { ws, tank: makeTank(0, cls), cls };
+  ws.send(JSON.stringify({
+    type: 'welcome', slot, roomId, arena: { W, H, GROUND_Y },
+    platforms: room.platforms,
+    classes: Object.fromEntries(Object.entries(CLASSES).map(([k,v]) => [k, {name:v.name, color:v.color}])),
+  }));
 
   if (room.players[1] && room.players[2] && room.matchOver) {
     resetMatch(room);
@@ -198,7 +330,11 @@ wss.on('connection', (ws, req) => {
       const msg = JSON.parse(raw);
       if (msg.type === 'input') {
         const p = room.players[slot];
-        if (p) p.tank.input = { dx: msg.dx || 0, dy: msg.dy || 0, firing: !!msg.firing };
+        if (p) p.tank.input = { dx: msg.dx || 0, firing: !!msg.firing };
+      } else if (msg.type === 'jump') {
+        jumpTank(room, slot);
+      } else if (msg.type === 'ability') {
+        useAbility(room, slot);
       } else if (msg.type === 'restart') {
         if (room.players[1] && room.players[2]) resetMatch(room);
       }
