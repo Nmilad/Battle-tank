@@ -286,49 +286,61 @@ function roundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
+// ---------- sprite images ----------
+const SPRITE_FILES = {
+  typhoon: 'sprites/sprite_typhoon.png',
+  reaper: 'sprites/sprite_reaper.png',
+  guardian: 'sprites/sprite_guardian.png',
+  vanquisher: 'sprites/sprite_vanquisher.png',
+};
+const spriteImages = {};
+for (const [cls, file] of Object.entries(SPRITE_FILES)) {
+  const img = new Image();
+  img.src = file;
+  spriteImages[cls] = img;
+}
+
 function drawTank(t, color) {
   if (!t || !t.alive) return;
   const [sx, sy] = toScreen(t.x, t.y);
-  const w = 36*scale, h = 44*scale;
+  const img = spriteImages[t.cls];
+
   ctx.save();
   ctx.translate(sx, sy);
-  ctx.scale(t.facing, 1);
 
+  // ground shadow
   ctx.fillStyle = 'rgba(0,0,0,0.4)';
   ctx.beginPath();
-  ctx.ellipse(0, 2, w*0.55, 6*scale, 0, 0, Math.PI*2);
+  ctx.ellipse(0, 2, 20*scale, 6*scale, 0, 0, Math.PI*2);
   ctx.fill();
 
-  ctx.fillStyle = shadeColor(color, -35);
-  ctx.fillRect(-w*0.32, -h*0.32, w*0.22, h*0.32);
-  ctx.fillRect(w*0.1, -h*0.32, w*0.22, h*0.32);
-
-  const grad = ctx.createLinearGradient(0, -h, 0, -h*0.3);
-  grad.addColorStop(0, shadeColor(color, 30));
-  grad.addColorStop(1, shadeColor(color, -15));
-  ctx.fillStyle = grad;
-  roundRect(-w*0.42, -h, w*0.84, h*0.72, 3*scale);
-  ctx.fill();
-  ctx.strokeStyle = shadeColor(color, -50);
-  ctx.stroke();
-
-  ctx.fillStyle = shadeColor(color, 15);
-  roundRect(-w*0.22, -h*1.18, w*0.44, h*0.24, 2*scale);
-  ctx.fill();
-  ctx.fillStyle = '#FFB347';
-  ctx.fillRect(-w*0.14, -h*1.1, w*0.3, h*0.08);
-
-  ctx.fillStyle = '#12171C';
-  ctx.fillRect(w*0.3, -h*0.72, w*0.42, h*0.14);
-
+  if (img && img.complete && img.naturalWidth > 0) {
+    const targetH = 92 * scale;
+    const targetW = targetH * (img.naturalWidth / img.naturalHeight);
+    ctx.scale(t.facing, 1);
+    ctx.drawImage(img, -targetW/2, -targetH, targetW, targetH);
+  } else {
+    // fallback vector shape while image loads
+    const w = 36*scale, h = 44*scale;
+    ctx.scale(t.facing, 1);
+    ctx.fillStyle = shadeColor(color, -35);
+    ctx.fillRect(-w*0.32, -h*0.32, w*0.22, h*0.32);
+    ctx.fillRect(w*0.1, -h*0.32, w*0.22, h*0.32);
+    const grad = ctx.createLinearGradient(0, -h, 0, -h*0.3);
+    grad.addColorStop(0, shadeColor(color, 30));
+    grad.addColorStop(1, shadeColor(color, -15));
+    ctx.fillStyle = grad;
+    roundRect(-w*0.42, -h, w*0.84, h*0.72, 3*scale);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
 function drawMuzzleFlash(t, color) {
   if (!t || !t.alive) return;
   const [sx, sy] = toScreen(t.x, t.y);
-  const fx = sx + t.facing * 34*scale;
-  const fy = sy - 44*scale*0.68;
+  const fx = sx + t.facing * 40*scale;
+  const fy = sy - 92*scale*0.55;
   const grad = ctx.createRadialGradient(fx,fy,0, fx,fy, 9*scale);
   grad.addColorStop(0, '#FFF3D6');
   grad.addColorStop(0.4, color);
