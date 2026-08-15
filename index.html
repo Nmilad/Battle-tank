@@ -265,9 +265,146 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
-let prevHp = { 1: null, 2: null };
-let prevAlive = { 1: true, 2: true };
-let prevBulletCount = 0;
+// ============================================================
+// ANIMATION SYSTEM
+// A per-character state machine driving procedural pose values.
+// Only IDLE and WALK are implemented this stage; the state enum
+// and update() already have hook points for RUN/JUMP/FALL/LAND/
+// SHOOT/HURT/ABILITY/DEATH so they can be added later without
+// restructuring this controller.
+//
+// NOTE on limb movement: the current art is a single flat PNG per
+// character (no separate body/arm/leg/weapon layers), so literal
+// independent limb articulation isn't possible yet. What this
+// controller does instead is a standard "whole-sprite procedural"
+// approach: vertical bob, forward/back lean, horizontal sway, a
+// subtle mechanical shear (gives a gait-like rocking impression),
+// and squash/stretch — all driven by the robot's real measured
+// speed, with smoothed (eased) transitions rather than instant
+// switches. True independent arm/leg motion would need the art
+// split into layered sprites later.
+// ============================================================
+const ANIM_STATE = Object.freeze({
+  IDLE: 'idle', WALK: 'walk', RUN: 'run', JUMP: 'jump', FALL: 'fall',
+  LAND: 'land', SHOOT: 'shoot', HURT: 'hurt', ABILITY: 'ability', DEATH: 'death',
+});
+
+class TankAnimator {
+  constructor() {
+    this.state = ANIM_STATE.IDLE;
+    this.blend = 0;       // 0 = fully idle pose, 1 = fully walk pose (eased, not instant)
+    this.phase = 0;       // walk-cycle clock
+    this.idlePhase = 0;   // slower, independent idle-breathing clock
+    this.speed = 0;       // smoothed horizontal speed (world units / ms)
+    this._prevX = null;
+  }
+
+  // tank: latest server-authoritative tank state for this slot
+  // dtMs: real elapsed time since last frame, in milliseconds
+  update(tank, dtMs) {
+    dtMs = Math.min(dtMs, 100); // guard against huge gaps (tab switch, lag spike)
+
+    // --- measure real horizontal speed from position deltas, smoothed ---
+    // (this is what makes accel/decel feel soft instead of snapping between poses)
+    if (this._prevX !== null && dtMs > 0) {
+      const instV = Math.abs(tank.x - this._prevX) / dtMs;
+      const smoothing = 1 - Math.pow(0.001, dtMs / 140); // ~140ms time constant
+      this.speed += (instV - this.speed) * smoothing;
+    }
+    this._prevX = tank.x;
+
+    // --- state selection ---
+    // Only IDLE/WALK are chosen for now. The other enum values are left
+    // wired here as comments showing exactly where they'd plug in later,
+    // without needing to touch gameplay/network code.
+    const MOVE_EPS = 0.012; // world units/ms below which the robot reads as "stopped"
+    let nextState = this.speed > MOVE_EPS ? ANIM_STATE.WALK : ANIM_STATE.IDLE;
+    // Future hooks (not active this stage):
+    //   !tank.grounded              -> ANIM_STATE.JUMP / ANIM_STATE.FALL
+    //   just transitioned to ground -> ANIM_STATE.LAND
+    //   external firing pulse       -> ANIM_STATE.SHOOT
+    //   recent damage taken         -> ANIM_STATE.HURT
+    //   ability just activated      -> ANIM_STATE.ABILITY
+    //   !tank.alive                 -> ANIM_STATE.DEATH
+    this.state = nextState;
+
+    // --- smooth (eased) idle <-> walk blend, ~220ms ---
+    const targetBlend = nextState === ANIM_STATE.WALK ? 1 : 0;
+    const blendSmoothing = 1 - Math.pow(0.001, dtMs / 220);
+    this.blend += (targetBlend - this.blend) * blendSmoothing;
+
+    // --- advance animation clocks ---
+    // stride rate scales with actual speed, so faster movement = faster cycle
+    const strideRate = 0.010 + this.speed * 0.55;
+    this.phase += dtMs * strideRate;
+    this.idlePhase += dtMs * 0.0026;
+
+    return this._pose();
+  }
+
+  _pose() {
+    const b = this.blend;
+    const walk = Math.sin(this.phase);
+    const idle = Math.sin(this.idlePhase);
+
+    return {
+      state: this.state,
+      blend: b,
+      // vertical bob: gentle idle breathing eases into a stronger walk bounce
+      bobY: idle * 1.1 * (1 - b) + Math.abs(walk) * 3.2 * b,
+      // forward/back body lean while walking (weight shift per step)
+      lean: walk * 0.055 * b,
+      // horizontal micro-sway
+      swayX: walk * 1.6 * b,
+      // mechanical shear: rocks the upper body relative to the feet,
+      // reading as a stylized gait without needing separate limb art
+      skew: walk * 0.09 * b,
+      // squash/stretch for a bit of mechanical "weight" per footfall
+      squashY: 1 - Math.abs(walk) * 0.035 * b - Math.abs(idle) * 0.007 * (1 - b),
+    };
+  }
+}
+
+const animators = { 1: new TankAnimator(), 2: new TankAnimator() };
+let lastFrameTs = null;
+
+// expanding ring effect (shockwave / heal aura / target reticle)
+let rings = [];
+function spawnRing(x, y, color, opts = {}) {
+  const { maxR = 70, life = 22, width = 3 } = opts;
+  rings.push({ x, y, r: 4, maxR, life, maxLife: life, color, width });
+}
+function updateRings() {
+  rings = rings.filter(rg => { rg.r += (rg.maxR - rg.r) * 0.25; rg.life--; return rg.life > 0; });
+}
+function drawRings() {
+  for (const rg of rings) {
+    const a = rg.life / rg.maxLife;
+    const [sx, sy] = toScreen(rg.x, rg.y);
+    ctx.save();
+    ctx.globalAlpha = a * 0.8;
+    ctx.strokeStyle = rg.color;
+    ctx.lineWidth = rg.width * scale;
+    ctx.beginPath();
+    ctx.arc(sx, sy, rg.r * scale, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function abilityEffect(cls, x, y) {
+  if (cls === 'typhoon') {
+    spawnRing(x, y, '#F2A93B', { maxR: 95, life: 20, width: 4 });
+    spawnBurst(x, y - 8, '#C9B458', 16, { speed: 4, life: 22, size: 3 });
+  } else if (cls === 'guardian') {
+    spawnRing(x, y, '#4ADE80', { maxR: 80, life: 28, width: 3 });
+    spawnBurst(x, y - 20, '#8CF5A8', 12, { speed: 1.6, life: 30, size: 2.5 });
+  } else if (cls === 'vanquisher') {
+    spawnRing(x, y, '#C25B4A', { maxR: 55, life: 24, width: 2 });
+  } else if (cls === 'reaper') {
+    spawnBurst(x, y - 20, '#AEB7BE', 10, { speed: 3, life: 16, size: 2 });
+  }
+}
 
 function shadeColor(hex, amt) {
   const c = hex.replace('#','');
@@ -300,29 +437,61 @@ for (const [cls, file] of Object.entries(SPRITE_FILES)) {
   spriteImages[cls] = img;
 }
 
-function drawTank(t, color) {
+function drawGhost(t, color, alpha) {
+  const img = spriteImages[t.cls];
+  if (!img || !img.complete || !img.naturalWidth) return;
+  const [sx, sy] = toScreen(t.x, t.y);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(sx, sy);
+  ctx.scale(t.facing, 1);
+  const targetH = 92 * scale;
+  const targetW = targetH * (img.naturalWidth / img.naturalHeight);
+  ctx.drawImage(img, -targetW/2, -targetH, targetW, targetH);
+  ctx.restore();
+}
+
+function drawTank(t, color, fx = {}) {
   if (!t || !t.alive) return;
+  const { recoilPx = 0, hitFlashActive = false, aimGlow = false, pose = {} } = fx;
+  const { bobY = 0, lean = 0, swayX = 0, skew = 0, squashY = 1 } = pose;
   const [sx, sy] = toScreen(t.x, t.y);
   const img = spriteImages[t.cls];
 
   ctx.save();
-  ctx.translate(sx, sy);
+  ctx.translate(sx - recoilPx * t.facing + swayX * scale, sy + bobY * scale);
 
-  // ground shadow
+  // ground shadow (stays put on the floor regardless of body sway/lean)
   ctx.fillStyle = 'rgba(0,0,0,0.4)';
   ctx.beginPath();
-  ctx.ellipse(0, 2, 20*scale, 6*scale, 0, 0, Math.PI*2);
+  ctx.ellipse(-swayX * scale, 2 - bobY * scale, 20*scale, 6*scale, 0, 0, Math.PI*2);
   ctx.fill();
+
+  if (aimGlow) {
+    const g = ctx.createRadialGradient(0,-46*scale,0, 0,-46*scale, 60*scale);
+    g.addColorStop(0, 'rgba(194,91,74,0.35)');
+    g.addColorStop(1, 'rgba(194,91,74,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(0, -46*scale, 60*scale, 0, Math.PI*2); ctx.fill();
+  }
+
+  ctx.scale(t.facing, 1);
+  ctx.rotate(lean);              // per-step weight-shift lean
+  ctx.transform(1, 0, skew, 1, 0, 0); // mechanical gait shear (no separate limb art needed)
+  ctx.scale(1, squashY);          // footfall squash/stretch
 
   if (img && img.complete && img.naturalWidth > 0) {
     const targetH = 92 * scale;
     const targetW = targetH * (img.naturalWidth / img.naturalHeight);
-    ctx.scale(t.facing, 1);
     ctx.drawImage(img, -targetW/2, -targetH, targetW, targetH);
+    if (hitFlashActive) {
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = 'rgba(255,70,70,0.55)';
+      ctx.fillRect(-targetW/2, -targetH, targetW, targetH);
+      ctx.globalCompositeOperation = 'source-over';
+    }
   } else {
-    // fallback vector shape while image loads
     const w = 36*scale, h = 44*scale;
-    ctx.scale(t.facing, 1);
     ctx.fillStyle = shadeColor(color, -35);
     ctx.fillRect(-w*0.32, -h*0.32, w*0.22, h*0.32);
     ctx.fillRect(w*0.1, -h*0.32, w*0.22, h*0.32);
@@ -390,7 +559,10 @@ function drawVignette() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
-function render() {
+function render(ts) {
+  const dt = lastFrameTs === null ? 16 : Math.max(0, ts - lastFrameTs);
+  lastFrameTs = ts;
+
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawPlatforms();
 
@@ -403,23 +575,56 @@ function render() {
       const prevH = prevHp[slot];
       if (prevH !== null && tank.hp < prevH) {
         spawnBurst(tank.x, tank.y - 22, '#FFD27A', 10, { speed: 2.5, life: 18, size: 2.5 });
+        hitFlash[slot] = 6;
       }
       if (prevAlive[slot] && !tank.alive) {
         spawnBurst(tank.x, tank.y - 22, '#FF7A45', 26, { speed: 4.5, life: 40, size: 4 });
       }
       prevHp[slot] = tank.hp;
       prevAlive[slot] = tank.alive;
+
+      // ability-use edge detection -> trigger visual
+      const prevCd = prevAbilityCd[slot];
+      if (tank.abilityMax && prevCd <= 1 && tank.abilityCooldown >= tank.abilityMax - 2) {
+        abilityEffect(tank.cls, tank.x, tank.y - 10);
+      }
+      prevAbilityCd[slot] = tank.abilityCooldown;
+
+      // dash afterimages
+      if (tank.dashing) {
+        dashTrail[slot].push({ x: tank.x, y: tank.y, facing: tank.facing, cls: tank.cls });
+        if (dashTrail[slot].length > 5) dashTrail[slot].shift();
+      } else {
+        dashTrail[slot] = [];
+      }
+
+      if (hitFlash[slot] > 0) hitFlash[slot]--;
+      if (recoil[slot] > 0) recoil[slot] -= recoil[slot] * 0.3;
     }
 
-    if (firing && me && me.alive) drawMuzzleFlash(me, '#F2A93B');
-    if (latestState.bullets.length > prevBulletCount && opp && opp.alive) drawMuzzleFlash(opp, '#3FD6C4');
+    if (firing && me && me.alive) { drawMuzzleFlash(me, '#F2A93B'); recoil[mySlot] = 5*scale; }
+    if (latestState.bullets.length > prevBulletCount && opp && opp.alive) {
+      drawMuzzleFlash(opp, '#3FD6C4');
+      recoil[mySlot === 1 ? 2 : 1] = 5*scale;
+    }
     prevBulletCount = latestState.bullets.length;
 
+    // dash afterimages (draw before bullets/tanks so tanks render on top)
+    for (const slot of [1, 2]) {
+      dashTrail[slot].forEach((g, i) => drawGhost(g, null, 0.08 + i*0.05));
+    }
+
     latestState.bullets.forEach(drawBullet);
-    const meColor = (classDefs[me && me.cls] || {}).color || '#F2A93B';
-    const oppColor = (classDefs[opp && opp.cls] || {}).color || '#3FD6C4';
-    drawTank(me, meColor);
-    drawTank(opp, oppColor);
+
+    for (const [slot, tank] of [[mySlot, me], [mySlot === 1 ? 2 : 1, opp]]) {
+      if (!tank) continue;
+      const pose = animators[slot].update(tank, dt);
+      drawTank(tank, (classDefs[tank.cls] || {}).color, {
+        pose, recoilPx: recoil[slot] || 0,
+        hitFlashActive: hitFlash[slot] > 0,
+        aimGlow: tank.aimBoost,
+      });
+    }
 
     document.getElementById('hpMe').style.width = (me ? Math.max(0, (me.hp/me.maxHp)*100) : 0) + '%';
     document.getElementById('hpOpp').style.width = (opp ? Math.max(0, (opp.hp/opp.maxHp)*100) : 0) + '%';
@@ -449,6 +654,8 @@ function render() {
 
   updateParticles();
   drawParticles();
+  updateRings();
+  drawRings();
   drawVignette();
   requestAnimationFrame(render);
 }
