@@ -13,7 +13,7 @@
   #joinScreen {
     position: fixed; inset: 0;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 18px; padding: 24px; text-align: center; z-index: 20; background: #0B0E11;
+    gap: 16px; padding: 24px; text-align: center; z-index: 20; background: #0B0E11;
   }
   #joinScreen.hidden { display: none; }
   #joinScreen .title { font-size: 26px; letter-spacing: 0.12em; text-transform: uppercase; color: #F2A93B; }
@@ -30,6 +30,20 @@
   #joinScreen .hint { font-size: 11px; color: #6B7684; line-height: 1.7; max-width: 280px; }
   #status { font-size: 12px; color: #6B7684; min-height: 16px; }
 
+  #classGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 260px; }
+  .classBtn {
+    font-family: inherit; background: #12171C; border: 1px solid #2A323C; color: #C9D1D9;
+    padding: 12px 8px; cursor: pointer; border-radius: 4px; position: relative;
+  }
+  .classBtn::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: var(--c); opacity: 0.5; border-radius: 4px 4px 0 0;
+  }
+  .classBtn.selected { border-color: var(--c); background: #171D24; }
+  .classBtn.selected::before { opacity: 1; }
+  .className { font-size: 13px; font-weight: bold; color: var(--c); }
+  .classRole { font-size: 10px; color: #6B7684; margin-top: 3px; }
+
   #hud { display: flex; justify-content: space-between; padding: 8px 10px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; flex-shrink: 0; }
   .player-tag { display: flex; align-items: center; gap: 6px; }
   .dot { width: 7px; height: 7px; flex-shrink: 0; }
@@ -42,18 +56,25 @@
 
   #gameArea { position: relative; flex: 1; min-height: 0; }
   canvas { display: block; width: 100%; height: 100%;
-    background:
-      radial-gradient(ellipse at center, #171D24 0%, #0D1114 75%),
-      repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 40px),
-      repeating-linear-gradient(90deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 40px);
+    background: radial-gradient(ellipse at center, #1B222A 0%, #0D1114 80%);
   }
 
   #controls { position: absolute; inset: 0; pointer-events: none; }
-  #stick, #fireBtn { pointer-events: auto; }
+  #stick, #fireBtn, #jumpBtn, #abilityBtn { pointer-events: auto; }
   #stick { position: absolute; left: 22px; bottom: 22px; width: 110px; height: 110px; border: 1px solid #3A4552; border-radius: 50%; background: rgba(30,38,46,0.5); }
   #stickKnob { position: absolute; left: 35px; top: 35px; width: 40px; height: 40px; border-radius: 50%; background: #F2A93B; opacity: 0.85; }
-  #fireBtn { position: absolute; right: 26px; bottom: 34px; width: 76px; height: 76px; border-radius: 50%; border: 1px solid #F2A93B; background: rgba(242,169,59,0.12); color: #F2A93B; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+
+  #fireBtn { position: absolute; right: 26px; bottom: 34px; width: 72px; height: 72px; border-radius: 50%; border: 1px solid #F2A93B; background: rgba(242,169,59,0.12); color: #F2A93B; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
   #fireBtn:active { background: rgba(242,169,59,0.35); }
+  #jumpBtn { position: absolute; right: 108px; bottom: 96px; width: 56px; height: 56px; border-radius: 50%; border: 1px solid #8CF5E6; background: rgba(63,214,196,0.12); color: #8CF5E6; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; }
+  #jumpBtn:active { background: rgba(63,214,196,0.35); }
+  #abilityBtn {
+    position: absolute; right: 26px; bottom: 118px; width: 56px; height: 56px;
+    border-radius: 50%; border: 1px solid #6FA8D6; background: rgba(111,168,214,0.12);
+    color: #6FA8D6; font-size: 9px; letter-spacing: 0.05em; text-transform: uppercase; overflow: hidden;
+  }
+  #abilityBtn .cdOverlay { position: absolute; inset: 0; background: rgba(11,14,17,0.75); transform-origin: bottom; transform: scaleY(0); }
+  #abilityBtn:disabled { opacity: 0.55; }
 
   #overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; background: rgba(11,14,17,0.92); gap: 16px; text-align: center; padding: 20px; pointer-events: auto; z-index: 10; }
   #overlay.show { display: flex; }
@@ -66,9 +87,23 @@
 
 <div id="joinScreen">
   <div class="title">Tank Arena</div>
+  <div id="classGrid">
+    <button class="classBtn" data-cls="typhoon" style="--c:#C9B458">
+      <div class="className">تایفون</div><div class="classRole">سنگین / دفاع</div>
+    </button>
+    <button class="classBtn" data-cls="reaper" style="--c:#AEB7BE">
+      <div class="className">ریپر</div><div class="classRole">سریع / هجومی</div>
+    </button>
+    <button class="classBtn" data-cls="guardian" style="--c:#5FA0D6">
+      <div class="className">گاردین</div><div class="classRole">پشتیبان / ترمیم</div>
+    </button>
+    <button class="classBtn" data-cls="vanquisher" style="--c:#C25B4A">
+      <div class="className">وانکویشر</div><div class="classRole">دوربرد</div>
+    </button>
+  </div>
   <input id="roomInput" maxlength="8" placeholder="کد اتاق" autocomplete="off" autocapitalize="characters">
   <button id="joinBtn">ورود به اتاق</button>
-  <div class="hint">یه کد دلخواه بنویس (مثلاً ALI123) و همون کد رو به دوستت بده تا هر دو وارد یه اتاق بشید.</div>
+  <div class="hint">اول رباتت رو انتخاب کن، بعد یه کد دلخواه بنویس و همون کد رو به دوستت بده.</div>
   <div id="status"></div>
 </div>
 
@@ -88,6 +123,8 @@
   <canvas id="game"></canvas>
   <div id="controls">
     <div id="stick"><div id="stickKnob"></div></div>
+    <button id="jumpBtn">پرش</button>
+    <button id="abilityBtn"><span>توانایی</span><div class="cdOverlay" id="abilityCd"></div></button>
     <button id="fireBtn">شلیک</button>
   </div>
   <div id="overlay">
@@ -98,14 +135,13 @@
 </div>
 
 <script>
-// ---------- Telegram Mini App setup ----------
 if (window.Telegram && window.Telegram.WebApp) {
   const tg = window.Telegram.WebApp;
   tg.ready();
   tg.expand();
   if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
-  if (tg.setHeaderColor) { try { tg.setHeaderColor('#0B0E11'); } catch(e){} }
-  if (tg.setBackgroundColor) { try { tg.setBackgroundColor('#0B0E11'); } catch(e){} }
+  try { tg.setHeaderColor('#0B0E11'); } catch(e){}
+  try { tg.setBackgroundColor('#0B0E11'); } catch(e){}
 }
 
 const joinScreen = document.getElementById('joinScreen');
@@ -122,7 +158,17 @@ const restartBtn = document.getElementById('restartBtn');
 const params = new URLSearchParams(location.search);
 if (params.get('room')) roomInput.value = params.get('room');
 
-let ws, mySlot, arena = {W:900,H:600}, walls = [];
+let selectedClass = 'typhoon';
+document.querySelectorAll('.classBtn').forEach(btn => {
+  if (btn.dataset.cls === selectedClass) btn.classList.add('selected');
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.classBtn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    selectedClass = btn.dataset.cls;
+  });
+});
+
+let ws, mySlot, arena = {W:1000,H:500,GROUND_Y:440}, platforms = [], classDefs = {};
 let latestState = null;
 
 joinBtn.addEventListener('click', () => {
@@ -134,7 +180,7 @@ joinBtn.addEventListener('click', () => {
 function connect(room) {
   statusEl.textContent = 'در حال اتصال...';
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}?room=${encodeURIComponent(room)}`);
+  ws = new WebSocket(`${proto}://${location.host}?room=${encodeURIComponent(room)}&cls=${encodeURIComponent(selectedClass)}`);
 
   ws.onopen = () => { statusEl.textContent = ''; };
   ws.onerror = () => { statusEl.textContent = 'خطا در اتصال به سرور.'; };
@@ -159,7 +205,8 @@ function connect(room) {
     if (msg.type === 'welcome') {
       mySlot = msg.slot;
       arena = msg.arena;
-      walls = msg.walls;
+      platforms = msg.platforms;
+      classDefs = msg.classes || {};
       joinScreen.classList.add('hidden');
       hud.style.display = 'flex';
       gameArea.style.display = 'block';
@@ -177,23 +224,30 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 let W, H, scale, offX, offY;
 
-// particle system for explosions, hit sparks, muzzle flashes
+function resize() {
+  const areaW = gameArea.clientWidth, areaH = gameArea.clientHeight;
+  canvas.width = areaW; canvas.height = areaH;
+  scale = Math.min(areaW / arena.W, areaH / arena.H);
+  offX = (areaW - arena.W * scale) / 2;
+  offY = (areaH - arena.H * scale) / 2;
+}
+window.addEventListener('resize', resize);
+function toScreen(x, y) { return [offX + x*scale, offY + y*scale]; }
+
+// ---------- particles ----------
 let particles = [];
 function spawnBurst(x, y, color, count, opts = {}) {
-  const { speed = 3, life = 30, size = 3, spread = Math.PI*2 } = opts;
+  const { speed = 3, life = 30, size = 3 } = opts;
   for (let i = 0; i < count; i++) {
-    const ang = Math.random() * spread - spread/2 + (opts.dir || 0);
+    const ang = Math.random() * Math.PI*2;
     const spd = speed * (0.4 + Math.random()*0.9);
-    particles.push({
-      x, y, vx: Math.cos(ang)*spd, vy: Math.sin(ang)*spd,
-      life, maxLife: life, color, size: size * (0.6 + Math.random()*0.8),
-    });
+    particles.push({ x, y, vx: Math.cos(ang)*spd, vy: Math.sin(ang)*spd - 1, life, maxLife: life, color, size: size * (0.6 + Math.random()*0.8) });
   }
 }
 function updateParticles() {
   particles = particles.filter(p => {
-    p.x += p.vx; p.y += p.vy;
-    p.vx *= 0.94; p.vy *= 0.94;
+    p.x += p.vx; p.y += p.vy; p.vy += 0.15;
+    p.vx *= 0.95;
     p.life--;
     return p.life > 0;
   });
@@ -211,95 +265,9 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
-// track previous state to detect hits/deaths/new shots
 let prevHp = { 1: null, 2: null };
 let prevAlive = { 1: true, 2: true };
 let prevBulletCount = 0;
-let myPrevFiring = false;
-let treadPhase = 0;
-
-function resize() {
-  const areaW = gameArea.clientWidth, areaH = gameArea.clientHeight;
-  canvas.width = areaW; canvas.height = areaH;
-  scale = Math.min(areaW / arena.W, areaH / arena.H);
-  offX = (areaW - arena.W * scale) / 2;
-  offY = (areaH - arena.H * scale) / 2;
-}
-window.addEventListener('resize', resize);
-
-function toScreen(x, y) { return [offX + x*scale, offY + y*scale]; }
-
-function drawTank(t, color, glowColor) {
-  if (!t || !t.alive) return;
-  const [sx, sy] = toScreen(t.x, t.y);
-  const s = 24 * scale;
-  ctx.save();
-  ctx.translate(sx, sy);
-  ctx.rotate(t.angle);
-
-  // soft ground shadow
-  ctx.save();
-  ctx.translate(2*scale, 3*scale);
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.beginPath();
-  ctx.ellipse(0, 0, s*0.62, s*0.5, 0, 0, Math.PI*2);
-  ctx.fill();
-  ctx.restore();
-
-  // treads (with animated tread marks)
-  const treadY = s/2 - 1*scale;
-  for (const dir of [-1, 1]) {
-    ctx.fillStyle = '#161C22';
-    ctx.fillRect(-s/2-2*scale, dir*treadY - 2*scale, s+4*scale, 4*scale);
-    ctx.fillStyle = '#0B0E11';
-    const segW = 5*scale;
-    const offset = (treadPhase % segW);
-    for (let x = -s/2-2*scale - segW; x < s/2+2*scale; x += segW) {
-      ctx.fillRect(x + offset, dir*treadY - 1.6*scale, segW*0.5, 3.2*scale);
-    }
-  }
-
-  // hull (body) with gradient shading
-  const grad = ctx.createLinearGradient(0, -s/2, 0, s/2);
-  grad.addColorStop(0, shadeColor(color, 28));
-  grad.addColorStop(0.5, color);
-  grad.addColorStop(1, shadeColor(color, -30));
-  ctx.fillStyle = grad;
-  roundRect(-s/2, -s/2+2*scale, s, s-4*scale, 3*scale);
-  ctx.fill();
-  ctx.strokeStyle = shadeColor(color, -45);
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  // turret (circular)
-  const turretR = s*0.34;
-  const tgrad = ctx.createRadialGradient(-turretR*0.3, -turretR*0.3, 1, 0, 0, turretR);
-  tgrad.addColorStop(0, shadeColor(color, 40));
-  tgrad.addColorStop(1, shadeColor(color, -20));
-  ctx.fillStyle = tgrad;
-  ctx.beginPath();
-  ctx.arc(0, 0, turretR, 0, Math.PI*2);
-  ctx.fill();
-  ctx.strokeStyle = shadeColor(color, -50);
-  ctx.stroke();
-
-  // barrel
-  ctx.fillStyle = '#12171C';
-  ctx.fillRect(turretR*0.3, -2.6*scale, s/2 + 8*scale - turretR*0.3, 5.2*scale);
-  ctx.fillStyle = '#232B33';
-  ctx.fillRect(turretR*0.3, -1*scale, s/2 + 8*scale - turretR*0.3, 1.6*scale);
-
-  // rim light glow accent
-  ctx.strokeStyle = glowColor;
-  ctx.globalAlpha = 0.5;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(0, 0, turretR + 1, -0.6, 0.6);
-  ctx.stroke();
-  ctx.globalAlpha = 1;
-
-  ctx.restore();
-}
 
 function shadeColor(hex, amt) {
   const c = hex.replace('#','');
@@ -318,26 +286,57 @@ function roundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
+function drawTank(t, color) {
+  if (!t || !t.alive) return;
+  const [sx, sy] = toScreen(t.x, t.y);
+  const w = 36*scale, h = 44*scale;
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.scale(t.facing, 1);
+
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(0, 2, w*0.55, 6*scale, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle = shadeColor(color, -35);
+  ctx.fillRect(-w*0.32, -h*0.32, w*0.22, h*0.32);
+  ctx.fillRect(w*0.1, -h*0.32, w*0.22, h*0.32);
+
+  const grad = ctx.createLinearGradient(0, -h, 0, -h*0.3);
+  grad.addColorStop(0, shadeColor(color, 30));
+  grad.addColorStop(1, shadeColor(color, -15));
+  ctx.fillStyle = grad;
+  roundRect(-w*0.42, -h, w*0.84, h*0.72, 3*scale);
+  ctx.fill();
+  ctx.strokeStyle = shadeColor(color, -50);
+  ctx.stroke();
+
+  ctx.fillStyle = shadeColor(color, 15);
+  roundRect(-w*0.22, -h*1.18, w*0.44, h*0.24, 2*scale);
+  ctx.fill();
+  ctx.fillStyle = '#FFB347';
+  ctx.fillRect(-w*0.14, -h*1.1, w*0.3, h*0.08);
+
+  ctx.fillStyle = '#12171C';
+  ctx.fillRect(w*0.3, -h*0.72, w*0.42, h*0.14);
+
+  ctx.restore();
+}
+
 function drawMuzzleFlash(t, color) {
   if (!t || !t.alive) return;
   const [sx, sy] = toScreen(t.x, t.y);
-  const s = 24 * scale;
-  const tipDist = s/2 + 8*scale;
-  const fx = sx + Math.cos(t.angle) * tipDist;
-  const fy = sy + Math.sin(t.angle) * tipDist;
-  ctx.save();
-  ctx.translate(fx, fy);
-  ctx.rotate(t.angle);
-  const grad = ctx.createRadialGradient(0,0,0, 0,0, 9*scale);
+  const fx = sx + t.facing * 34*scale;
+  const fy = sy - 44*scale*0.68;
+  const grad = ctx.createRadialGradient(fx,fy,0, fx,fy, 9*scale);
   grad.addColorStop(0, '#FFF3D6');
   grad.addColorStop(0.4, color);
   grad.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.ellipse(2*scale, 0, 9*scale, 5*scale, 0, 0, Math.PI*2);
-  ctx.fill();
-  ctx.restore();
+  ctx.beginPath(); ctx.ellipse(fx, fy, 9*scale, 5*scale, 0, 0, Math.PI*2); ctx.fill();
 }
+
 function drawBullet(b) {
   const [sx, sy] = toScreen(b.x, b.y);
   const color = b.owner === mySlot ? '#F2A93B' : '#3FD6C4';
@@ -353,33 +352,26 @@ function drawBullet(b) {
   ctx.fillStyle = '#FFFFFF';
   ctx.beginPath(); ctx.arc(sx, sy, 2*scale, 0, Math.PI*2); ctx.fill();
 }
-function drawWalls() {
-  for (const w of walls) {
-    const [sx, sy] = toScreen(w.x, w.y);
-    const ww = w.w*scale, wh = w.h*scale;
+
+function drawPlatforms() {
+  for (const p of platforms) {
+    if (p.x < 0 || p.x >= arena.W) continue;
+    const [sx, sy] = toScreen(p.x, p.y);
+    const ww = p.w*scale, wh = p.h*scale;
     const grad = ctx.createLinearGradient(sx, sy, sx, sy+wh);
-    grad.addColorStop(0, '#2E3844');
+    grad.addColorStop(0, '#33404B');
     grad.addColorStop(1, '#1B2229');
     ctx.fillStyle = grad;
     ctx.fillRect(sx, sy, ww, wh);
-    ctx.strokeStyle = '#454F5C';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(sx+0.5, sy+0.5, ww-1, wh-1);
-    // corner bolts for a industrial-plate look
-    if (ww > 12*scale && wh > 12*scale) {
-      ctx.fillStyle = '#0E1216';
-      const pad = 5*scale;
-      for (const [bx, by] of [[pad,pad],[ww-pad,pad],[pad,wh-pad],[ww-pad,wh-pad]]) {
-        ctx.beginPath(); ctx.arc(sx+bx, sy+by, 1.3*scale, 0, Math.PI*2); ctx.fill();
-      }
-    }
+    ctx.strokeStyle = '#4A5A68';
+    ctx.strokeRect(sx+0.5, sy+0.5, ww-1, Math.max(1,wh-1));
   }
 }
 
 function drawVignette() {
   const cx = canvas.width/2, cy = canvas.height/2;
-  const r = Math.max(canvas.width, canvas.height) * 0.75;
-  const grad = ctx.createRadialGradient(cx, cy, r*0.3, cx, cy, r);
+  const r = Math.max(canvas.width, canvas.height) * 0.8;
+  const grad = ctx.createRadialGradient(cx, cy, r*0.35, cx, cy, r);
   grad.addColorStop(0, 'rgba(0,0,0,0)');
   grad.addColorStop(1, 'rgba(0,0,0,0.55)');
   ctx.fillStyle = grad;
@@ -388,41 +380,44 @@ function drawVignette() {
 
 function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawWalls();
+  drawPlatforms();
 
   if (latestState) {
     const me = latestState.players[mySlot];
     const opp = latestState.players[mySlot === 1 ? 2 : 1];
 
-    // detect hits (hp decreased) -> spark burst; detect death -> explosion
     for (const [slot, tank] of [[mySlot, me], [mySlot === 1 ? 2 : 1, opp]]) {
       if (!tank) continue;
       const prevH = prevHp[slot];
       if (prevH !== null && tank.hp < prevH) {
-        spawnBurst(tank.x, tank.y, '#FFD27A', 10, { speed: 2.5, life: 18, size: 2.5 });
+        spawnBurst(tank.x, tank.y - 22, '#FFD27A', 10, { speed: 2.5, life: 18, size: 2.5 });
       }
       if (prevAlive[slot] && !tank.alive) {
-        spawnBurst(tank.x, tank.y, '#FF7A45', 26, { speed: 4.5, life: 40, size: 4 });
-        spawnBurst(tank.x, tank.y, '#3A4552', 14, { speed: 2, life: 55, size: 5 });
+        spawnBurst(tank.x, tank.y - 22, '#FF7A45', 26, { speed: 4.5, life: 40, size: 4 });
       }
       prevHp[slot] = tank.hp;
       prevAlive[slot] = tank.alive;
     }
 
-    // muzzle flash: own tank via local firing edge, opponent via bullet-count growth
     if (firing && me && me.alive) drawMuzzleFlash(me, '#F2A93B');
-    if (latestState.bullets.length > prevBulletCount && opp && opp.alive) {
-      drawMuzzleFlash(opp, '#3FD6C4');
-    }
+    if (latestState.bullets.length > prevBulletCount && opp && opp.alive) drawMuzzleFlash(opp, '#3FD6C4');
     prevBulletCount = latestState.bullets.length;
 
     latestState.bullets.forEach(drawBullet);
-    drawTank(me, '#F2A93B', '#FFD27A');
-    drawTank(opp, '#3FD6C4', '#8CF5E6');
+    const meColor = (classDefs[me && me.cls] || {}).color || '#F2A93B';
+    const oppColor = (classDefs[opp && opp.cls] || {}).color || '#3FD6C4';
+    drawTank(me, meColor);
+    drawTank(opp, oppColor);
 
-    document.getElementById('hpMe').style.width = (me ? Math.max(0,me.hp) : 0) + '%';
-    document.getElementById('hpOpp').style.width = (opp ? Math.max(0,opp.hp) : 0) + '%';
+    document.getElementById('hpMe').style.width = (me ? Math.max(0, (me.hp/me.maxHp)*100) : 0) + '%';
+    document.getElementById('hpOpp').style.width = (opp ? Math.max(0, (opp.hp/opp.maxHp)*100) : 0) + '%';
     document.getElementById('roundLabel').textContent = 'ROUND ' + latestState.round;
+
+    if (me) {
+      const cdFrac = me.abilityMax ? me.abilityCooldown / me.abilityMax : 0;
+      abilityCd.style.transform = `scaleY(${cdFrac})`;
+      abilityBtn.disabled = cdFrac > 0;
+    }
 
     const oppConnected = latestState.connected[mySlot === 1 ? 2 : 1];
     if (!oppConnected) {
@@ -443,20 +438,16 @@ function render() {
   updateParticles();
   drawParticles();
   drawVignette();
-
-  if (Math.abs(stickVec.x) > 0.08 || Math.abs(stickVec.y) > 0.08) treadPhase += 0.9 * scale;
-
   requestAnimationFrame(render);
 }
 let renderStarted = false;
-function startRender() { if (!renderStarted) { renderStarted = true; render(); } }
+function startRender() { if (!renderStarted) { renderStarted = true; requestAnimationFrame(render); } }
 
 restartBtn.addEventListener('click', () => { ws.send(JSON.stringify({type:'restart'})); });
 
-// ---------- touch joystick ----------
 const stick = document.getElementById('stick');
 const knob = document.getElementById('stickKnob');
-let stickActive = false, stickVec = {x:0, y:0};
+let stickActive = false, stickX = 0;
 
 function stickPos() { const r = stick.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; }
 function handleStickMove(clientX, clientY) {
@@ -466,9 +457,9 @@ function handleStickMove(clientX, clientY) {
   const ang = Math.atan2(dy, dx);
   dx = Math.cos(ang) * dist; dy = Math.sin(ang) * dist;
   knob.style.left = (35 + dx) + 'px'; knob.style.top = (35 + dy) + 'px';
-  stickVec = { x: dx/40, y: dy/40 };
+  stickX = dx/40;
 }
-function resetStick() { stickActive = false; stickVec = {x:0,y:0}; knob.style.left = '35px'; knob.style.top = '35px'; }
+function resetStick() { stickActive = false; stickX = 0; knob.style.left = '35px'; knob.style.top = '35px'; }
 
 stick.addEventListener('touchstart', e => { stickActive = true; handleStickMove(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); });
 stick.addEventListener('touchmove', e => { if (stickActive) handleStickMove(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); });
@@ -484,10 +475,20 @@ fireBtn.addEventListener('touchend', e => { firing = false; e.preventDefault(); 
 fireBtn.addEventListener('mousedown', () => firing = true);
 fireBtn.addEventListener('mouseup', () => firing = false);
 
-// send input at fixed rate
+const jumpBtn = document.getElementById('jumpBtn');
+function triggerJump(e) { e.preventDefault(); if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'jump' })); }
+jumpBtn.addEventListener('touchstart', triggerJump);
+jumpBtn.addEventListener('mousedown', triggerJump);
+
+const abilityBtn = document.getElementById('abilityBtn');
+const abilityCd = document.getElementById('abilityCd');
+function triggerAbility(e) { e.preventDefault(); if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'ability' })); }
+abilityBtn.addEventListener('touchstart', triggerAbility);
+abilityBtn.addEventListener('mousedown', triggerAbility);
+
 setInterval(() => {
   if (ws && ws.readyState === 1) {
-    ws.send(JSON.stringify({ type: 'input', dx: stickVec.x, dy: stickVec.y, firing }));
+    ws.send(JSON.stringify({ type: 'input', dx: stickX, firing }));
   }
 }, 33);
 </script>
